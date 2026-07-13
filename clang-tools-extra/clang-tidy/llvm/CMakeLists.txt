@@ -8,6 +8,7 @@ add_clang_library(clangTidyLLVMModule STATIC
   HeaderGuardCheck.cpp
   IncludeOrderCheck.cpp
   LLVMTidyModule.cpp
+  MlirInvalidRewriterApiCheck.cpp
   PreferIsaOrDynCastInConditionalsCheck.cpp
   PreferRegisterOverUnsignedCheck.cpp
   PreferStaticOverAnonymousNamespaceCheck.cpp

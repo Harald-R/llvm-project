@@ -14,6 +14,7 @@
 #include "FormatvStringCheck.h"
 #include "HeaderGuardCheck.h"
 #include "IncludeOrderCheck.h"
+#include "MlirInvalidRewriterApiCheck.h"
 #include "PreferIsaOrDynCastInConditionalsCheck.h"
 #include "PreferRegisterOverUnsignedCheck.h"
 #include "PreferStaticOverAnonymousNamespaceCheck.h"
@@ -36,6 +37,8 @@ public:
     CheckFactories.registerCheck<FormatvStringCheck>("llvm-formatv-string");
     CheckFactories.registerCheck<LLVMHeaderGuardCheck>("llvm-header-guard");
     CheckFactories.registerCheck<IncludeOrderCheck>("llvm-include-order");
+    CheckFactories.registerCheck<MlirInvalidRewriterApiCheck>(
+        "llvm-mlir-invalid-rewriter-api");
     CheckFactories.registerCheck<readability::NamespaceCommentCheck>(
         "llvm-namespace-comment");
     CheckFactories.registerCheck<PreferIsaOrDynCastInConditionalsCheck>(

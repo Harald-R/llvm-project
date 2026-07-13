@@ -242,6 +242,11 @@ New checks
   Validates ``llvm::formatv`` format strings against the provided arguments,
   diagnosing mismatched argument counts, unused arguments, and mixed index styles.
 
+- New :doc:`llvm-mlir-invalid-rewriter-api
+  <clang-tidy/checks/llvm/mlir-invalid-rewriter-api>` check.
+
+  FIXME: Write a short description.
+
 - New :doc:`llvm-redundant-casting
   <clang-tidy/checks/llvm/redundant-casting>` check.
 
