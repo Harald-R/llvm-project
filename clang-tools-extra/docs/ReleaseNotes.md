@@ -134,6 +134,12 @@ infrastructure are described first, followed by tool-specific sections.
 
   Detects malformed regex patterns defined in a single string literal.
 
+- New {doc}`llvm-mlir-use-after-erase
+  <clang-tidy/checks/llvm/mlir-use-after-erase>` check.
+
+  Finds uses of an MLIR operation after it has been erased or replaced, for
+  example through `Operation::erase` or `RewriterBase::eraseOp`.
+
 - New {doc}`modernize-use-to-underlying
   <clang-tidy/checks/modernize/use-to-underlying>` check.
 
