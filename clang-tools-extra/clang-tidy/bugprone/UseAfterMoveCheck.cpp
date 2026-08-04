@@ -67,6 +67,7 @@ public:
   UseAfterMoveFinder(ASTContext *TheContext,
                      llvm::ArrayRef<StringRef> InvalidationFunctions,
                      llvm::ArrayRef<StringRef> ReinitializationFunctions,
+                     llvm::ArrayRef<StringRef> ReportAccessOnlyUseForTypes,
                      const CXXRecordDecl *MovedAs);
 
   // Within the given code block, finds the first use of 'MovedVariable' that
@@ -92,6 +93,7 @@ private:
   ASTContext *Context;
   llvm::ArrayRef<StringRef> InvalidationFunctions;
   llvm::ArrayRef<StringRef> ReinitializationFunctions;
+  llvm::ArrayRef<StringRef> ReportAccessOnlyUseForTypes;
   const CXXRecordDecl *MovedAs;
   std::unique_ptr<ExprSequence> Sequence;
   std::unique_ptr<StmtToBlockMap> BlockMap;
@@ -205,9 +207,12 @@ static StatementMatcher inDecltypeOrTemplateArg() {
 UseAfterMoveFinder::UseAfterMoveFinder(
     ASTContext *TheContext, llvm::ArrayRef<StringRef> InvalidationFunctions,
     llvm::ArrayRef<StringRef> ReinitializationFunctions,
+    llvm::ArrayRef<StringRef> ReportAccessOnlyUseForTypes,
     const CXXRecordDecl *MovedAs)
     : Context(TheContext), InvalidationFunctions(InvalidationFunctions),
-      ReinitializationFunctions(ReinitializationFunctions), MovedAs(MovedAs) {}
+      ReinitializationFunctions(ReinitializationFunctions),
+      ReportAccessOnlyUseForTypes(ReportAccessOnlyUseForTypes),
+      MovedAs(MovedAs) {}
 
 std::optional<UseAfterMove>
 UseAfterMoveFinder::find(Stmt *CodeBlock, const Expr *MovingCall,
@@ -404,32 +409,70 @@ static bool isSpecifiedAfterMove(const ValueDecl *VD) {
   return RecordDecl->getDeclContext()->isStdNamespace();
 }
 
+// Returns true if the check must report a use of `VD` only when the code
+// accesses the object (a member access or a dereference). The check does not
+// report other references to the variable. This is the behavior when the type
+// of `VD` is a pointer to a type in the ReportAccessOnlyUseForTypes option, or
+// a class that is the same as or derived from such a type.
+static bool
+reportAccessOnlyUse(const ValueDecl *VD, ASTContext &Context,
+                    llvm::ArrayRef<StringRef> ReportAccessOnlyUseForTypes) {
+  if (ReportAccessOnlyUseForTypes.empty())
+    return false;
+
+  const auto RecordIsListed = cxxRecordDecl(isSameOrDerivedFrom(
+      matchers::matchesAnyListedRegexName(ReportAccessOnlyUseForTypes)));
+  const auto TypeMatcher =
+      qualType(anyOf(pointsTo(RecordIsListed), hasDeclaration(RecordIsListed)));
+
+  const QualType QT = VD->getType().getNonReferenceType().getCanonicalType();
+  return !match(TypeMatcher, QT, Context).empty();
+}
+
 void UseAfterMoveFinder::getDeclRefs(
     const CFGBlock *Block, const Decl *MovedVariable,
     llvm::SmallPtrSetImpl<const DeclRefExpr *> *DeclRefs) {
   DeclRefs->clear();
+
+  // For the types in the ReportAccessOnlyUseForTypes option, only a member
+  // access or a dereference of the object counts as a use. A different
+  // reference to the variable (for example, an argument, a comparison, or a
+  // copy) does not count as a use.
+  const auto *MovedValueDecl = dyn_cast<ValueDecl>(MovedVariable);
+  const bool ReportAccessOnly =
+      MovedValueDecl && reportAccessOnlyUse(MovedValueDecl, *Context,
+                                            ReportAccessOnlyUseForTypes);
+
   for (const auto &Elem : *Block) {
     std::optional<CFGStmt> S = Elem.getAs<CFGStmt>();
     if (!S)
       continue;
 
-    const auto AddDeclRefs = [this, Block,
-                              DeclRefs](const ArrayRef<BoundNodes> Matches) {
+    const auto AddDeclRefs = [this, Block, DeclRefs, ReportAccessOnly](
+                                 const ArrayRef<BoundNodes> Matches) {
       for (const auto &Match : Matches) {
         const auto *DeclRef = Match.getNodeAs<DeclRefExpr>("declref");
         const auto *Member = Match.getNodeAs<MemberExpr>("member-expr");
         const auto *Operator = Match.getNodeAs<CXXOperatorCallExpr>("operator");
+        const auto *Access = Match.getNodeAs<Expr>("access");
         // Non-moved member as the move only implies a base class.
         if (Member && MovedAs && !isa<CXXMethodDecl>(Member->getMemberDecl()) &&
             !MovedAs->hasMemberName(Member->getMemberDecl()->getIdentifier())) {
           continue;
         }
-        if (DeclRef && BlockMap->blockContainingStmt(DeclRef) == Block &&
-            (Operator || !isSpecifiedAfterMove(DeclRef->getDecl())))
-          // Ignore uses of a standard smart pointer or classes annotated as
-          // "null_after_move" (smart-pointer-like behavior) that don't
-          // dereference the pointer.
-          DeclRefs->insert(DeclRef);
+        if (DeclRef && BlockMap->blockContainingStmt(DeclRef) == Block) {
+          if (ReportAccessOnly) {
+            // Report the use only if the code accesses the object: a member
+            // access (`op->m`, `op.m`), an overloaded dereference operator, or
+            // a built-in dereference (`*op`) or subscript (`op[i]`).
+            if (Member || Operator || Access)
+              DeclRefs->insert(DeclRef);
+          } else if (Operator || !isSpecifiedAfterMove(DeclRef->getDecl())) {
+            // Ignore uses of a standard smart pointer, or of a class with the
+            // "null_after_move" annotation, that do not dereference the pointer.
+            DeclRefs->insert(DeclRef);
+          }
+        }
       }
     };
 
@@ -449,6 +492,24 @@ void UseAfterMoveFinder::getDeclRefs(
                                   hasArgument(0, DeclRefMatcher))
                                   .bind("operator")),
                       *S->getStmt(), *Context));
+    // A built-in dereference (`*op`) or a subscript (`op[i]`) of the variable
+    // is also an access. The ReportAccessOnlyUseForTypes types (for example,
+    // raw pointers) need these matchers, because these operators are not
+    // overloaded calls. Thus, the "member-expr" and "operator" matchers do not
+    // match them.
+    AddDeclRefs(match(
+        traverse(TK_AsIs,
+                 findAll(unaryOperator(hasOperatorName("*"),
+                                       hasUnaryOperand(ignoringParenImpCasts(
+                                           DeclRefMatcher)))
+                             .bind("access"))),
+        *S->getStmt(), *Context));
+    AddDeclRefs(match(
+        traverse(TK_AsIs,
+                 findAll(arraySubscriptExpr(
+                             hasBase(ignoringParenImpCasts(DeclRefMatcher)))
+                             .bind("access"))),
+        *S->getStmt(), *Context));
   }
 }
 
@@ -541,13 +602,18 @@ UseAfterMoveCheck::UseAfterMoveCheck(StringRef Name, ClangTidyContext *Context)
       InvalidationFunctions(utils::options::parseStringList(
           Options.get("InvalidationFunctions", ""))),
       ReinitializationFunctions(utils::options::parseStringList(
-          Options.get("ReinitializationFunctions", ""))) {}
+          Options.get("ReinitializationFunctions", ""))),
+      ReportAccessOnlyUseForTypes(utils::options::parseStringList(
+          Options.get("ReportAccessOnlyUseForTypes", ""))) {}
 
 void UseAfterMoveCheck::storeOptions(ClangTidyOptions::OptionMap &Opts) {
   Options.store(Opts, "InvalidationFunctions",
                 utils::options::serializeStringList(InvalidationFunctions));
   Options.store(Opts, "ReinitializationFunctions",
                 utils::options::serializeStringList(ReinitializationFunctions));
+  Options.store(
+      Opts, "ReportAccessOnlyUseForTypes",
+      utils::options::serializeStringList(ReportAccessOnlyUseForTypes));
 }
 
 void UseAfterMoveCheck::registerMatchers(MatchFinder *Finder) {
@@ -656,7 +722,8 @@ void UseAfterMoveCheck::check(const MatchFinder::MatchResult &Result) {
 
   for (Stmt *CodeBlock : CodeBlocks) {
     UseAfterMoveFinder Finder(Result.Context, InvalidationFunctions,
-                              ReinitializationFunctions, MovedAs);
+                              ReinitializationFunctions,
+                              ReportAccessOnlyUseForTypes, MovedAs);
     if (auto Use = Finder.find(CodeBlock, MovingCall, Arg))
       emitDiagnostic(MovingCall, Arg, *Use, this, Result.Context,
                      determineMoveType(MoveDecl), MoveDecl);
