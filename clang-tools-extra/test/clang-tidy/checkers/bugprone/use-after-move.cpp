@@ -1,6 +1,7 @@
 // RUN: %check_clang_tidy -std=c++11,c++14 -check-suffixes=,CXX11 %s bugprone-use-after-move %t -- \
 // RUN:   -config='{CheckOptions: { \
 // RUN:     bugprone-use-after-move.InvalidationFunctions: "::Database<>::StaticCloseConnection;Database<>::CloseConnection;FriendCloseConnection;FreeCloseConnection", \
+// RUN:     bugprone-use-after-move.ArgumentInvalidationFunctions: "::argument_invalidation::Rewriter::eraseOp(0);::argument_invalidation::Rewriter::replaceOp(0);::argument_invalidation::Rewriter::replaceOpAt(1);::argument_invalidation::freeEraseOp(0)", \
 // RUN:     bugprone-use-after-move.ReinitializationFunctions: "::Database<>::Reset;::Database<>::StaticReset;::FriendReset;::RegularReset", \
 // RUN:     bugprone-use-after-move.ReportAccessOnlyUseForTypes: "::report_access_only::AccessOnly;::report_access_only::HandleBase" \
 // RUN:   }}' -- \
@@ -8,6 +9,7 @@
 // RUN: %check_clang_tidy -std=c++17-or-later %s bugprone-use-after-move %t -- \
 // RUN:   -config='{CheckOptions: { \
 // RUN:     bugprone-use-after-move.InvalidationFunctions: "::Database<>::StaticCloseConnection;Database<>::CloseConnection;FriendCloseConnection;FreeCloseConnection", \
+// RUN:     bugprone-use-after-move.ArgumentInvalidationFunctions: "::argument_invalidation::Rewriter::eraseOp(0);::argument_invalidation::Rewriter::replaceOp(0);::argument_invalidation::Rewriter::replaceOpAt(1);::argument_invalidation::freeEraseOp(0)", \
 // RUN:     bugprone-use-after-move.ReinitializationFunctions: "::Database<>::Reset;::Database<>::StaticReset;::FriendReset;::RegularReset", \
 // RUN:     bugprone-use-after-move.ReportAccessOnlyUseForTypes: "::report_access_only::AccessOnly;::report_access_only::HandleBase" \
 // RUN:   }}' -- \
@@ -2114,3 +2116,65 @@ void nonListedPointerCompareIsUse() {
 }
 
 } // namespace report_access_only
+
+////////////////////////////////////////////////////////////////////////////////
+// Tests for the ArgumentInvalidationFunctions option
+//
+// Functions in this option invalidate one argument. The index in the option
+// gives the argument (for example, `foo(0)`). This applies to free functions
+// and to member functions. The argument can be at any index.
+
+namespace argument_invalidation {
+
+struct Op {
+  void use();
+};
+
+struct Rewriter {
+  void eraseOp(Op *op);
+  void replaceOp(Op *op);
+  void replaceOpAt(int pos, Op *op);
+  void notInvalidating(Op *op);
+};
+
+void freeEraseOp(Op *op);
+
+// A member function invalidates its first argument.
+void memberEraseInvalidatesArg() {
+  Rewriter rewriter;
+  Op *op = nullptr;
+  rewriter.eraseOp(op);
+  op->use();
+  // CHECK-NOTES: [[@LINE-1]]:3: warning: 'op' used after it was invalidated by 'eraseOp'
+  // CHECK-NOTES: [[@LINE-3]]:12: note: invalidation occurred here
+}
+
+// A free function invalidates its first argument.
+void freeEraseInvalidatesArg() {
+  Op *op = nullptr;
+  freeEraseOp(op);
+  op->use();
+  // CHECK-NOTES: [[@LINE-1]]:3: warning: 'op' used after it was invalidated by 'freeEraseOp'
+  // CHECK-NOTES: [[@LINE-3]]:3: note: invalidation occurred here
+}
+
+// A member function invalidates an argument at a non-zero index (here, index
+// 1). The other arguments stay valid.
+void nonZeroIndexInvalidatesCorrectArg() {
+  Rewriter rewriter;
+  Op *op = nullptr;
+  rewriter.replaceOpAt(0, op);
+  op->use();
+  // CHECK-NOTES: [[@LINE-1]]:3: warning: 'op' used after it was invalidated by 'replaceOpAt'
+  // CHECK-NOTES: [[@LINE-3]]:12: note: invalidation occurred here
+}
+
+// A function that is not configured does not invalidate its argument.
+void unconfiguredFunctionDoesNotInvalidate() {
+  Rewriter rewriter;
+  Op *op = nullptr;
+  rewriter.notInvalidating(op);
+  op->use();
+}
+
+} // namespace argument_invalidation
