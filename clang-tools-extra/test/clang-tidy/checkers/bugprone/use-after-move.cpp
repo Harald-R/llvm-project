@@ -1,13 +1,15 @@
 // RUN: %check_clang_tidy -std=c++11,c++14 -check-suffixes=,CXX11 %s bugprone-use-after-move %t -- \
 // RUN:   -config='{CheckOptions: { \
 // RUN:     bugprone-use-after-move.InvalidationFunctions: "::Database<>::StaticCloseConnection;Database<>::CloseConnection;FriendCloseConnection;FreeCloseConnection", \
-// RUN:     bugprone-use-after-move.ReinitializationFunctions: "::Database<>::Reset;::Database<>::StaticReset;::FriendReset;::RegularReset" \
+// RUN:     bugprone-use-after-move.ReinitializationFunctions: "::Database<>::Reset;::Database<>::StaticReset;::FriendReset;::RegularReset", \
+// RUN:     bugprone-use-after-move.ReportAccessOnlyUseForTypes: "::report_access_only::AccessOnly;::report_access_only::HandleBase" \
 // RUN:   }}' -- \
 // RUN:   -fno-delayed-template-parsing
 // RUN: %check_clang_tidy -std=c++17-or-later %s bugprone-use-after-move %t -- \
 // RUN:   -config='{CheckOptions: { \
 // RUN:     bugprone-use-after-move.InvalidationFunctions: "::Database<>::StaticCloseConnection;Database<>::CloseConnection;FriendCloseConnection;FreeCloseConnection", \
-// RUN:     bugprone-use-after-move.ReinitializationFunctions: "::Database<>::Reset;::Database<>::StaticReset;::FriendReset;::RegularReset" \
+// RUN:     bugprone-use-after-move.ReinitializationFunctions: "::Database<>::Reset;::Database<>::StaticReset;::FriendReset;::RegularReset", \
+// RUN:     bugprone-use-after-move.ReportAccessOnlyUseForTypes: "::report_access_only::AccessOnly;::report_access_only::HandleBase" \
 // RUN:   }}' -- \
 // RUN:   -fno-delayed-template-parsing
 
@@ -1998,3 +2000,117 @@ void callPartialForwardTemplate(Derived &&d) {
   partialForwardTemplate<Derived>(std::forward<Derived>(d));
 }
 } // namespace GH63202
+
+////////////////////////////////////////////////////////////////////////////////
+// Tests for the ReportAccessOnlyUseForTypes option
+//
+// For the types in this option, only a member access or a dereference of the
+// object counts as a use. A different reference to the variable (an argument, a
+// comparison, or a copy) does not count as a use. This applies to pointers to a
+// listed type, and to classes that are the same as or derived from a listed
+// type.
+
+namespace report_access_only {
+
+struct AccessOnly {
+  void foo() const;
+  int bar;
+};
+
+void takePointer(AccessOnly *);
+
+void pointerMethodAccessIsUse() {
+  AccessOnly *op = nullptr;
+  std::move(op);
+  op->foo();
+  // CHECK-NOTES: [[@LINE-1]]:3: warning: 'op' used after it was moved
+  // CHECK-NOTES: [[@LINE-3]]:3: note: move occurred here
+}
+
+void pointerMemberDataAccessIsUse() {
+  AccessOnly *op = nullptr;
+  std::move(op);
+  int i = op->bar;
+  (void)i;
+  // CHECK-NOTES: [[@LINE-2]]:11: warning: 'op' used after it was moved
+  // CHECK-NOTES: [[@LINE-4]]:3: note: move occurred here
+}
+
+void pointerDerefIsUse() {
+  AccessOnly *op = nullptr;
+  std::move(op);
+  *op;
+  // CHECK-NOTES: [[@LINE-1]]:4: warning: 'op' used after it was moved
+  // CHECK-NOTES: [[@LINE-3]]:3: note: move occurred here
+}
+
+void pointerSubscriptIsUse() {
+  AccessOnly *op = nullptr;
+  std::move(op);
+  op[0];
+  // CHECK-NOTES: [[@LINE-1]]:3: warning: 'op' used after it was moved
+  // CHECK-NOTES: [[@LINE-3]]:3: note: move occurred here
+}
+
+void pointerPassIsNotUse() {
+  AccessOnly *op = nullptr;
+  std::move(op);
+  takePointer(op);
+}
+
+void pointerCompareIsNotUse() {
+  AccessOnly *op = nullptr;
+  std::move(op);
+  if (op == nullptr) {
+  }
+}
+
+void pointerCopyIsNotUse() {
+  AccessOnly *op = nullptr;
+  std::move(op);
+  AccessOnly *op2 = op;
+  (void)op2;
+}
+
+struct HandleBase {};
+struct Handle : HandleBase {
+  void foo() const;
+};
+
+void takeHandle(Handle);
+
+void handleMemberAccessIsUse() {
+  Handle h;
+  std::move(h);
+  h.foo();
+  // CHECK-NOTES: [[@LINE-1]]:3: warning: 'h' used after it was moved
+  // CHECK-NOTES: [[@LINE-3]]:3: note: move occurred here
+}
+
+void handlePassIsNotUse() {
+  Handle h;
+  std::move(h);
+  takeHandle(h);
+}
+
+void handleCopyIsNotUse() {
+  Handle h;
+  std::move(h);
+  Handle h2 = h;
+  (void)h2;
+}
+
+struct NotListedInConfig {
+  void foo() const;
+};
+
+void nonListedPointerCompareIsUse() {
+  NotListedInConfig *p = nullptr;
+  std::move(p);
+  if (p == nullptr) {
+  }
+  // CHECK-NOTES: [[@LINE-2]]:7: warning: 'p' used after it was moved
+  // CHECK-NOTES: [[@LINE-4]]:3: note: move occurred here
+}
+
+} // namespace report_access_only
