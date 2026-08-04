@@ -262,6 +262,16 @@ For member functions, the first argument is considered to be the implicit
 object argument (`this`). Default value is an empty string.
 ```
 
+```{option} ArgumentInvalidationFunctions
+A semicolon-separated list of regular expressions matching names of functions
+that invalidate one of their arguments. Each entry may be followed by the
+zero-based index of the invalidated argument in parentheses, for example
+`Manager::close(0)`; when the index is omitted the first argument (index
+`0`) is used. Unlike `InvalidationFunctions`, the index refers to an explicit
+argument, so for member functions index `0` is the first non-`this` argument.
+Default value is an empty string.
+```
+
 ```{option} ReinitializationFunctions
 A semicolon-separated list of regular expressions matching names of functions
 that reinitialize the object. For member functions, the implicit object
