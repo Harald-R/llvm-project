@@ -33,6 +33,7 @@ private:
   std::vector<StringRef> ArgumentInvalidationFunctions;
   std::vector<StringRef> ReinitializationFunctions;
   std::vector<StringRef> ReportAccessOnlyUseForTypes;
+  std::vector<StringRef> HandleAccessorFunctions;
 };
 
 } // namespace clang::tidy::bugprone

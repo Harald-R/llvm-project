@@ -625,7 +625,9 @@ UseAfterMoveCheck::UseAfterMoveCheck(StringRef Name, ClangTidyContext *Context)
       ReinitializationFunctions(utils::options::parseStringList(
           Options.get("ReinitializationFunctions", ""))),
       ReportAccessOnlyUseForTypes(utils::options::parseStringList(
-          Options.get("ReportAccessOnlyUseForTypes", ""))) {}
+          Options.get("ReportAccessOnlyUseForTypes", ""))),
+      HandleAccessorFunctions(utils::options::parseStringList(
+          Options.get("HandleAccessorFunctions", ""))) {}
 
 void UseAfterMoveCheck::storeOptions(ClangTidyOptions::OptionMap &Opts) {
   Options.store(Opts, "InvalidationFunctions",
@@ -638,6 +640,8 @@ void UseAfterMoveCheck::storeOptions(ClangTidyOptions::OptionMap &Opts) {
   Options.store(
       Opts, "ReportAccessOnlyUseForTypes",
       utils::options::serializeStringList(ReportAccessOnlyUseForTypes));
+  Options.store(Opts, "HandleAccessorFunctions",
+                utils::options::serializeStringList(HandleAccessorFunctions));
 }
 
 // Parses the ArgumentInvalidationFunctions option entries. Each entry has the
@@ -684,6 +688,24 @@ void UseAfterMoveCheck::registerMatchers(MatchFinder *Finder) {
       callee(functionDecl(unless(isStaticStorageClass())));
   const auto DerivedToBaseCast =
       implicitCastExpr(hasCastKind(CK_DerivedToBase)).bind("optional-cast");
+
+  // A handle accessor unwraps a handle object to the underlying resource that
+  // gets invalidated, e.g. `op.operator->()` or `op.getOperation()` where `op`
+  // is a wrapper variable (such as an mlir::OpState). When the invalidated
+  // object or argument is such an accessor call, the tracked variable is the
+  // handle `op` inside it, not the unwrapped resource. This lets the check flag
+  // uses of `op` after the resource it refers to has been invalidated. When the
+  // option is empty the accessor never matches, so this reduces to matching the
+  // tracked variable directly.
+  const auto HandleAccessorCallee = callee(cxxMethodDecl(
+      matchers::matchesAnyListedRegexName(HandleAccessorFunctions)));
+  const auto HandleAccessor = expr(anyOf(
+      cxxMemberCallExpr(HandleAccessorCallee, on(ignoringParenImpCasts(Arg))),
+      cxxOperatorCallExpr(HandleAccessorCallee,
+                          hasArgument(0, ignoringParenImpCasts(Arg)))));
+  // The invalidated object or argument is either the tracked variable directly
+  // or the variable behind a single handle accessor call.
+  const auto ArgOrHandle = expr(anyOf(Arg, HandleAccessor));
 
   // Wraps an invalidation "core" matcher into the full moving-call matcher and
   // registers it. The core matcher matches the invalidating call. It binds the
@@ -736,9 +758,9 @@ void UseAfterMoveCheck::registerMatchers(MatchFinder *Finder) {
   AddMovingCallMatcher(
       allOf(callee(functionDecl(getNameMatcher(InvalidationFunctions))
                        .bind("move-decl")),
-            anyOf(cxxMemberCallExpr(IsMemberCallee, on(Arg)),
+            anyOf(cxxMemberCallExpr(IsMemberCallee, on(ArgOrHandle)),
                   callExpr(unless(cxxMemberCallExpr(IsMemberCallee)),
-                           hasArgument(0, Arg)))));
+                           hasArgument(0, ignoringParenImpCasts(ArgOrHandle))))));
 
   // Functions in ArgumentInvalidationFunctions invalidate one argument. The
   // index in the option gives the argument (for example, `foo(0)`). This
@@ -748,7 +770,7 @@ void UseAfterMoveCheck::registerMatchers(MatchFinder *Finder) {
     AddMovingCallMatcher(allOf(
         callee(functionDecl(matchers::matchesAnyListedRegexName(Func.first))
                    .bind("move-decl")),
-        hasArgument(Func.second, ignoringParenImpCasts(Arg))));
+        hasArgument(Func.second, ignoringParenImpCasts(ArgOrHandle))));
   }
 }
 
