@@ -189,6 +189,14 @@ infrastructure are described first, followed by tool-specific sections.
   <clang-tidy/checks/bugprone/std-namespace-modification>` when checking
   lambda closure types used as template arguments.
 
+- Improved {doc}`bugprone-use-after-move
+  <clang-tidy/checks/bugprone/use-after-move>` check by adding the
+  `ArgumentInvalidationFunctions`, `ReportAccessOnlyUseForTypes`, and
+  `HandleAccessorFunctions` options, which allow the check to model functions
+  that invalidate a specific argument, restrict reported uses to object
+  accesses for the listed types, and track a handle variable through an
+  unwrapping accessor call.
+
 - Improved {doc}`cppcoreguidelines-missing-std-forward
   <clang-tidy/checks/cppcoreguidelines/missing-std-forward>` check by diagnosing
   unforwarded `auto&&` parameters in C++20 abbreviated function templates.
