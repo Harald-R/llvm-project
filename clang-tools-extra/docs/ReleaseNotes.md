@@ -208,11 +208,10 @@ infrastructure are described first, followed by tool-specific sections.
   passing, comparing, or copying the moved-from variable. The
   {option}`InvalidationFunctions` option now defaults to
   `::std::move;::std::forward`; custom values replace this default, so list
-  these functions explicitly to continue checking them.
-  Also added {option}`ArgumentInvalidationFunctions` and
-  {option}`HandleAccessorFunctions` options, which allow the check to model
-  functions that invalidate a specific argument, and track a handle variable
-  through an unwrapping accessor call.
+  these functions explicitly to continue checking them. Entries may specify
+  an explicit argument index to model functions that invalidate a specific
+  argument. Also added the {option}`HandleAccessorFunctions` option to track a
+  handle variable through an unwrapping accessor call.
 
 - Improved {doc}`cppcoreguidelines-missing-std-forward
   <clang-tidy/checks/cppcoreguidelines/missing-std-forward>` check by diagnosing
