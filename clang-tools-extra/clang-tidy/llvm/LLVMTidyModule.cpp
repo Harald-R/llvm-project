@@ -70,11 +70,10 @@ public:
     Options.CheckOptions["llvm-else-after-return.WarnOnConditionVariables"] =
         "false";
     Options.CheckOptions["llvm-mlir-use-after-erase.InvalidationFunctions"] =
-        "::mlir::Operation::erase$;::mlir::Operation::destroy$";
-    Options.CheckOptions
-        ["llvm-mlir-use-after-erase.ArgumentInvalidationFunctions"] =
-        "::mlir::RewriterBase::eraseOp(0);::mlir::RewriterBase::eraseOpResults("
-        "0);::mlir::RewriterBase::replaceOp(0)";
+        "::mlir::Operation::erase$;::mlir::Operation::destroy$;"
+        "::mlir::RewriterBase::eraseOp(0);"
+        "::mlir::RewriterBase::eraseOpResults(0);"
+        "::mlir::RewriterBase::replaceOp(0)";
     Options
         .CheckOptions["llvm-mlir-use-after-erase.ReportAccessOnlyUseForTypes"] =
         "::mlir::Operation;::mlir::OpState";

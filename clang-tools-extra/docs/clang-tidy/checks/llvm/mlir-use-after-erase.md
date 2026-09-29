@@ -35,17 +35,13 @@ variable through them.
 This check is implemented as a preconfigured instance of
 {doc}`bugprone-use-after-move <../bugprone/use-after-move>`. See that check's
 documentation for the meaning of the `InvalidationFunctions`,
-`ArgumentInvalidationFunctions`, `ReportAccessOnlyUseForTypes`, and
-`HandleAccessorFunctions` options, which are used to model the MLIR API.
+`ReportAccessOnlyUseForTypes`, and `HandleAccessorFunctions` options, which
+are used to model the MLIR API.
 
 ## Options
 
 ```{option} InvalidationFunctions
-Default is `::mlir::Operation::erase;::mlir::Operation::destroy`.
-```
-
-```{option} ArgumentInvalidationFunctions
-Default is `::mlir::RewriterBase::eraseOp(0);::mlir::RewriterBase::eraseOpResults(0);::mlir::RewriterBase::replaceOp(0)`.
+Default is `::mlir::Operation::erase$;::mlir::Operation::destroy$;::mlir::RewriterBase::eraseOp(0);::mlir::RewriterBase::eraseOpResults(0);::mlir::RewriterBase::replaceOp(0)`.
 ```
 
 ```{option} ReportAccessOnlyUseForTypes
